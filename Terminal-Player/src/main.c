@@ -2,24 +2,32 @@
 #include "decoder.h"
 #include <stdio.h>
 
-
-
 static RingBuffer rb = 
 {
     .buffer = {0},
     .write_ptr = 0, 
     .read_ptr = 0, 
-    .buffer_mutex = PTHREAD_MUTEX_INITIALIZER 
+    .buffer_mutex = PTHREAD_MUTEX_INITIALIZER,
+    .isFull = false
 };
 
+static AudioPlayerState player = {0};
 
 
 //raylib audio reader from rb
-
 void raylib_audio_callback(void *buffer, unsigned int frames) 
 {
     float *out = (float *)buffer;
-    //Samples = frames * AUDIO_CHANNELS (stereo)
+
+    //fills buffer with silence
+    
+    if(!player.is_playing)
+    {
+        memset(buffer, 0, sizeof(buffer));
+        return;
+    }
+
+
     unsigned int samples_to_write = frames * AUDIO_CHANNELS;
 
     //critical section
@@ -28,16 +36,15 @@ void raylib_audio_callback(void *buffer, unsigned int frames)
     for (unsigned int i = 0; i < samples_to_write; i++) {
         if (rb.read_ptr == rb.write_ptr) 
         {
-            // Buffer is empty, fill with silence
             out[i] = 0.0f;
         } 
         else 
         {
             out[i] = rb.buffer[rb.read_ptr];
-            //increment read pointer, mod is to wrap around the buffer size
-            rb.read_ptr = (rb.read_ptr + 1) % (AUDIO_SAMPLE_RATE * AUDIO_CHANNELS * SECONDS_BUFFER);
+            rb.read_ptr = (rb.read_ptr + 1) % BUFFER_SIZE;
         }
     }
+
     //end critical section
 
     pthread_mutex_unlock(&rb.buffer_mutex);
@@ -55,10 +62,10 @@ void raylib_audio_callback(void *buffer, unsigned int frames)
 
 int main(int argc, char **argv) {
 
-    // if (argc < 2) {
-    //     printf("Usage: %s <path_to_audio_file>\n", argv[0]);
-    //     return 1;
-    // }
+    if (argc < 2) {
+        printf("Usage: %s <path_to_audio_file>\n", argv[0]);
+        return 1;
+    }
 
 
     // Initialize Raylib Window
@@ -70,25 +77,23 @@ int main(int argc, char **argv) {
     // Initialize Raylib Audio device
     InitAudioDevice();
 
-    AudioPlayerState player = {0};
-    AudioStream stream = LoadAudioStream(AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, 32); // 32-bit float
+
+    AudioStream stream = LoadAudioStream(AUDIO_SAMPLE_RATE, 32, AUDIO_CHANNELS); // 32-bit float
+
 
     //set the audio stream callback to custom function
     SetAudioStreamCallback(stream, raylib_audio_callback);
 
 
     // close the Device/window if the decoder fails to initialize
-    if (!init_decoder(&player, argv[1]) || !init_translator(&player)) {
+    if (!init_decoder(&player, argv[1]) || !init_translator(&player) ) {
         CloseAudioDevice();
         CloseWindow();
         return 1;
     }
 
-
     
-
     player.is_playing = true;
-
 
     // GUI loop
 

@@ -102,15 +102,16 @@ bool init_translator( AudioPlayerState *state )
 
 void write_to_buffer( RingBuffer *rb, const float * data, int num_samples )
 {
+
     pthread_mutex_lock(&rb->buffer_mutex);
 
     // Write data to the ring buffer
     for (int i = 0; i < num_samples; i++) 
-    {
+    {   
+
         rb->buffer[rb->write_ptr] = data[i];
-
-        //we need to check if the consumer has caught up to the producer, if so we will overwrite the oldest data in the buffer     
-
+        rb->write_ptr = (rb->write_ptr + 1) % (BUFFER_SIZE);
+    
         if (rb->write_ptr == rb->read_ptr) 
         {   
             rb->read_ptr = (rb->read_ptr + 1) % (BUFFER_SIZE);
@@ -121,22 +122,33 @@ void write_to_buffer( RingBuffer *rb, const float * data, int num_samples )
 
 }
 
-void dump_ring_buffer( RingBuffer *rb )
-{
-    for(int i = 0; i < BUFFER_SIZE; i++)
-    {
-        if (!rb->buffer[i]) break;
-        printf ("%f ", rb->buffer[i]);
-    }    
-    printf("\n");
-}
+
+/*
+
+*/
+
+
+
+
+
+
+
+
+
+
+
 
 void decode_audio_frame( AudioPlayerState *state, RingBuffer *rb ) {
 
     // Allocate packet and frame
-    
+
+    //don't waste time decoding frames if the buffer is full
+    if(rb->isFull)
+        return;
+
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
+
     if (av_read_frame(state->format_ctx, packet) >= 0) 
     {
         if (packet->stream_index == state->audio_stream_index) 
@@ -148,28 +160,28 @@ void decode_audio_frame( AudioPlayerState *state, RingBuffer *rb ) {
                  while (avcodec_receive_frame(state->codec_ctx, frame) >= 0) 
                 {
                     
+
+
+
                     
                     int64_t delay =  swr_get_delay(state->swr_ctx, frame->sample_rate);
                     int out_count = av_rescale_rnd(delay + frame->nb_samples, AUDIO_SAMPLE_RATE, 
                                                    frame->sample_rate, AV_ROUND_UP);
+
+
+                    //we need to put this on the stack.                               
                     uint8_t *out_buffer = NULL;
                     int out_linesize;
                     av_samples_alloc(&out_buffer, &out_linesize, AUDIO_CHANNELS, out_count, AV_SAMPLE_FMT_FLT, 0);
                     int converted_samples = swr_convert(state->swr_ctx, &out_buffer, out_count, 
                                                        (const uint8_t **)frame->data, frame->nb_samples);
+
                     if (converted_samples > 0)
                     {
-                        // Write the converted samples to the ring buffer
-                        write_to_buffer(rb, (float *)out_buffer, converted_samples * AUDIO_CHANNELS);
+                        write_to_buffer(rb, (float *)out_buffer, converted_samples * AUDIO_CHANNELS); 
                     }
 
-                    
-                    //debug - want to see what is in ring buffer
-
-                    dump_ring_buffer(&rb);
-
                     av_freep(&out_buffer);
-
                     av_frame_unref(frame);
 
                 }
@@ -182,10 +194,10 @@ void decode_audio_frame( AudioPlayerState *state, RingBuffer *rb ) {
 
     int flush_samples = swr_convert(state->swr_ctx, NULL, 0, NULL, 0);
 
-
     av_packet_unref(packet);
     av_frame_free(&frame);
     av_packet_free(&packet);
+
 }
 
 void close_decoder(AudioPlayerState *state) {

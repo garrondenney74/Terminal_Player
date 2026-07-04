@@ -5,6 +5,9 @@
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libswresample/swresample.h>
+#include <libavutil/opt.h>
+
+
 #include <pthread.h>
 
 //raylib expect specific audio format, so we need to convert the decoded audio to that format.
@@ -34,12 +37,14 @@ typedef struct
     float buffer[BUFFER_SIZE];
     int write_ptr;
     int read_ptr;
+    bool isFull;
     pthread_mutex_t buffer_mutex;
 
 } RingBuffer;
 
 
 bool init_decoder(AudioPlayerState *state, const char *filename);
+bool init_translator( AudioPlayerState *state );
 void decode_audio_frame(AudioPlayerState *state, RingBuffer *rb);
 void close_decoder(AudioPlayerState *state);
 
